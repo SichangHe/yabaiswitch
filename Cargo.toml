@@ -2,6 +2,9 @@
 name = "yabaiswitch"
 version = "0.1.0"
 edition = "2021"
+description = "Steven's script to switch windows using Yabai"
+license = "MIT"
+repository = "https://github.com/SichangHe/yabaiswitch"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
