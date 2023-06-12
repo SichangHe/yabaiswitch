@@ -1,43 +1,46 @@
 use std::{collections::VecDeque, env::args, process::Command};
 
 use anyhow::{bail, Result};
+use serde::{Deserialize, Serialize};
 
 fn main() -> Result<()> {
     let args: Vec<_> = args().collect();
 
-    let run = |command: String| -> Result<_> {
-        let output = Command::new("bash").args(["-c", &command]).output()?;
+    let raw_run = |command, args| -> Result<_> {
+        let output = Command::new(command).args(args).output()?;
         Ok(String::from_utf8(output.stdout)?)
+    };
+    let run = |command: String| -> Result<_> {
+        let result = raw_run("bash".to_owned(), vec!["-c".into(), command])?;
+        Ok(result)
     };
     let display = |content, title, subtitle| {
         run(format!(
             r#"osascript -e 'display notification "{content}" with title "{title}" subtitle "{subtitle}"'"#
         ))
     };
-    const YABAI: &str = " /opt/homebrew/bin/yabai ";
-    const JQ: &str = " ~/.nix-profile/bin/jq ";
+    const YABAI: &str = "/opt/homebrew/bin/yabai";
+    const JQ: &str = "~/.nix-profile/bin/jq";
+    let split_args = |string: &str| string.split_whitespace().map(|s| s.into()).collect();
     let cycle = || -> Result<_> {
-        let ids = run(format!(
-            "{YABAI} -m query --windows --space | {JQ} '.[].id'"
-        ))?;
-        let id: usize = run(format!("{YABAI} -m query --windows --window | {JQ} '.id'"))?
-            .trim()
-            .parse()?;
-
-        let mut id_list = ids
-            .split_whitespace()
-            .map(|s| s.parse())
-            .collect::<Result<VecDeque<_>, _>>()?;
+        let raw_ids = raw_run(YABAI.into(), split_args("-m query --windows --space"))?;
+        let mut id_list: VecDeque<WindowInfo> = serde_json::from_str(&raw_ids)?;
         id_list.make_contiguous().sort();
 
-        let index = id_list.binary_search(&id).unwrap();
+        let index = id_list
+            .iter()
+            .enumerate()
+            .find_map(|(index, window)| window.has_focus.then_some(index))
+            .unwrap_or(0);
         if args[1] == "next" {
             id_list.rotate_left(1);
         } else {
             id_list.rotate_right(1);
         }
-        let target = id_list[index];
-        run(format!("{YABAI} -m window --focus {target}"))
+        let target = id_list[index].id.to_string();
+        let mut args = split_args("-m window --focus");
+        args.push(target);
+        raw_run(YABAI.into(), args)
     };
     let info = || -> Result<_> {
         let apps = run(format!(
@@ -75,4 +78,11 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+struct WindowInfo {
+    id: usize,
+    has_focus: bool,
 }
