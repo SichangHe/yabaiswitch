@@ -19,7 +19,7 @@ fn main() -> Result<()> {
             r#"osascript -e 'display notification "{content}" with title "{title}" subtitle "{subtitle}"'"#
         ))
     };
-    const YABAI: &str = "/opt/homebrew/bin/yabai";
+    const YABAI: &str = "/usr/local/bin/yabai";
     const JQ: &str = "~/.nix-profile/bin/jq";
     let split_args = |string: &str| string.split_whitespace().map(|s| s.into()).collect();
     let cycle = || -> Result<_> {
