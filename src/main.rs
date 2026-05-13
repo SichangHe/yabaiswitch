@@ -21,9 +21,10 @@ fn notify(content: &str, title: &str, subtitle: &str) {
 }
 
 /// Focus window by id, re-issuing every 10 ms if macOS steals focus, up to 10 retries.
+/// Focusing an already-focused window is not an error.
 fn focus_window(id: usize) -> Result<()> {
     let id_s = id.to_string();
-    yabai_run(&["-m", "window", "--focus", &id_s])?;
+    let _ = yabai_run(&["-m", "window", "--focus", &id_s]);
     for _ in 0..10 {
         sleep(Duration::from_millis(10));
         let focused = yabai_run(&["-m", "query", "--windows", "--window"])
@@ -35,6 +36,29 @@ fn focus_window(id: usize) -> Result<()> {
             break;
         }
         let _ = yabai_run(&["-m", "window", "--focus", &id_s]);
+    }
+    Ok(())
+}
+
+/// Focus a space by selector, re-issuing every 10 ms if macOS overrides, up to 10 retries.
+/// Resolves selector to absolute index first so relative selectors (prev/next) stay correct
+/// after the space switch changes what "prev"/"next" means.
+fn focus_space(sel: &str) -> Result<()> {
+    let raw = yabai_run(&["-m", "query", "--spaces", "--space", sel])?;
+    let idx = serde_json::from_str::<SpaceIndex>(&raw)?.index;
+    let idx_s = idx.to_string();
+    let _ = yabai_run(&["-m", "space", "--focus", &idx_s]);
+    for _ in 0..10 {
+        sleep(Duration::from_millis(10));
+        let on_target = yabai_run(&["-m", "query", "--spaces", "--space"])
+            .ok()
+            .and_then(|s| serde_json::from_str::<SpaceIndex>(&s).ok())
+            .map(|s| s.index == idx)
+            .unwrap_or(false);
+        if on_target {
+            break;
+        }
+        let _ = yabai_run(&["-m", "space", "--focus", &idx_s]);
     }
     Ok(())
 }
@@ -126,9 +150,11 @@ fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
         .map(|w| w.id);
     #[cfg(debug_assertions)]
     notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
-    yabai_run(&["-m", "space", "--focus", sel])?;
     if let Some(id) = preferred {
+        yabai_run(&["-m", "space", "--focus", sel])?;
         focus_window(id)?;
+    } else {
+        focus_space(sel)?;
     }
     Ok(())
 }
