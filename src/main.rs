@@ -36,18 +36,16 @@ fn run() -> Result<()> {
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .collect();
-    let debug = env::var("YABAISWITCH_DEBUG").is_ok();
-    if debug {
-        notify(&format!("{exclude:?}").replace('"', ""), "exclude", "");
-    }
+    #[cfg(debug_assertions)]
+    notify(&format!("{exclude:?}").replace('"', ""), "exclude", "");
     match args.get(1).map(String::as_str) {
-        Some(dir @ ("next" | "last")) => cycle(dir, &exclude, debug),
+        Some(dir @ ("next" | "last")) => cycle(dir, &exclude),
         Some("space") => {
             let sel = match args.get(2).map(String::as_str) {
                 Some(s) if !s.starts_with('-') => s,
                 _ => bail!("space requires a selector: prev, next, first, last, recent, <index>"),
             };
-            space_focus(sel, &exclude, debug)
+            space_focus(sel, &exclude)
         }
         Some("info") => info(),
         Some(cmd) => bail!("Unknown command `{cmd}`. Valid: next, last, space, info."),
@@ -55,7 +53,7 @@ fn run() -> Result<()> {
     }
 }
 
-fn cycle(dir: &str, exclude: &[String], debug: bool) -> Result<()> {
+fn cycle(dir: &str, exclude: &[String]) -> Result<()> {
     let raw = yabai_run(&["-m", "query", "--windows", "--space"])?;
     let mut windows: VecDeque<WindowInfo> = serde_json::from_str(&raw)?;
     windows.make_contiguous().sort();
@@ -74,13 +72,12 @@ fn cycle(dir: &str, exclude: &[String], debug: bool) -> Result<()> {
         windows.rotate_right(1);
     }
     let target = &windows[idx];
-    if debug {
-        notify(
-            &format!("id={} app={}", target.id, target.app),
-            "cycle target",
-            "",
-        );
-    }
+    #[cfg(debug_assertions)]
+    notify(
+        &format!("id={} app={}", target.id, target.app),
+        "cycle target",
+        "",
+    );
     yabai_run(&["-m", "window", "--focus", &target.id.to_string()])?;
     Ok(())
 }
@@ -88,31 +85,28 @@ fn cycle(dir: &str, exclude: &[String], debug: bool) -> Result<()> {
 /// Focus a space and then refocus the best non-excluded, non-minimized, non-hidden window.
 /// Pre-queries target space to select preferred window before switching, preventing both
 /// Zoom decorative windows grabbing focus and the macOS bounce on stale/missing last-focused window.
-fn space_focus(sel: &str, exclude: &[String], debug: bool) -> Result<()> {
+fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
     let raw = yabai_run(&["-m", "query", "--windows", "--space", sel])?;
     let windows: Vec<WindowInfo> = serde_json::from_str(&raw)?;
-    if debug {
-        notify(&format!("{windows:?}").replace('"', ""), "windows", "");
-    }
+    #[cfg(debug_assertions)]
+    notify(&format!("{windows:?}").replace('"', ""), "windows", "");
     let candidates: Vec<_> = windows
         .iter()
         .filter(|w| !exclude.contains(&w.app) && !w.is_minimized && !w.is_hidden)
         .collect();
-    if debug {
-        notify(
-            &format!("{candidates:?}").replace('"', ""),
-            "candidates",
-            "",
-        );
-    }
+    #[cfg(debug_assertions)]
+    notify(
+        &format!("{candidates:?}").replace('"', ""),
+        "candidates",
+        "",
+    );
     let preferred = candidates
         .iter()
         .find(|w| w.has_focus)
         .or_else(|| candidates.first())
         .map(|w| w.id.to_string());
-    if debug {
-        notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
-    }
+    #[cfg(debug_assertions)]
+    notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
     yabai_run(&["-m", "space", "--focus", sel])?;
     if let Some(id) = preferred {
         yabai_run(&["-m", "window", "--focus", &id])?;
