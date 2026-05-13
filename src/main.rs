@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, env, env::args, process::Command};
+use std::{collections::VecDeque, env, env::args, process::Command, thread::sleep, time::Duration};
 
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -18,6 +18,25 @@ fn notify(content: &str, title: &str, subtitle: &str) {
         format!(r#"display notification "{content}" with title "{title}" subtitle "{subtitle}""#)
     };
     let _ = Command::new("osascript").args(["-e", &script]).output();
+}
+
+/// Focus window by id, re-issuing every 10 ms if macOS steals focus, up to 10 retries.
+fn focus_window(id: usize) -> Result<()> {
+    let id_s = id.to_string();
+    yabai_run(&["-m", "window", "--focus", &id_s])?;
+    for _ in 0..10 {
+        sleep(Duration::from_millis(10));
+        let focused = yabai_run(&["-m", "query", "--windows", "--window"])
+            .ok()
+            .and_then(|s| serde_json::from_str::<WindowId>(&s).ok())
+            .map(|w| w.id == id)
+            .unwrap_or(false);
+        if focused {
+            break;
+        }
+        let _ = yabai_run(&["-m", "window", "--focus", &id_s]);
+    }
+    Ok(())
 }
 
 fn yabai_run(yabai_args: &[&str]) -> Result<String> {
@@ -78,7 +97,7 @@ fn cycle(dir: &str, exclude: &[String]) -> Result<()> {
         "cycle target",
         "",
     );
-    yabai_run(&["-m", "window", "--focus", &target.id.to_string()])?;
+    focus_window(target.id)?;
     Ok(())
 }
 
@@ -104,12 +123,12 @@ fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
         .iter()
         .find(|w| w.has_focus)
         .or_else(|| candidates.first())
-        .map(|w| w.id.to_string());
+        .map(|w| w.id);
     #[cfg(debug_assertions)]
     notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
     yabai_run(&["-m", "space", "--focus", sel])?;
     if let Some(id) = preferred {
-        yabai_run(&["-m", "window", "--focus", &id])?;
+        focus_window(id)?;
     }
     Ok(())
 }
@@ -140,6 +159,11 @@ struct WindowInfo {
     has_focus: bool,
     is_minimized: bool,
     is_hidden: bool,
+}
+
+#[derive(Deserialize)]
+struct WindowId {
+    id: usize,
 }
 
 #[derive(Deserialize)]
