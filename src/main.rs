@@ -34,6 +34,18 @@ fn parse_exclude_apps(args: &[String]) -> Vec<String> {
 fn run() -> Result<()> {
     let args: Vec<_> = args().collect();
     let exclude = parse_exclude_apps(&args);
+    #[cfg(debug_assertions)]
+    {
+        Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"display notification "{}" with title "exclude""#,
+                    format!("{exclude:?}").replace('"', "")
+                ),
+            ])
+            .output()?;
+    }
     match args.get(1).map(String::as_str) {
         Some(dir @ ("next" | "last")) => cycle(dir, &exclude),
         Some("space") => {
@@ -77,15 +89,51 @@ fn cycle(dir: &str, exclude: &[String]) -> Result<()> {
 fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
     let raw = yabai_run(&["-m", "query", "--windows", "--space", sel])?;
     let windows: Vec<WindowInfo> = serde_json::from_str(&raw)?;
+    #[cfg(debug_assertions)]
+    {
+        Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"display notification "{}" with title "windows""#,
+                    format!("{windows:?}").replace('"', "")
+                ),
+            ])
+            .output()?;
+    }
     let candidates: Vec<_> = windows
         .iter()
         .filter(|w| !exclude.contains(&w.app) && !w.is_minimized && !w.is_hidden)
         .collect();
+    #[cfg(debug_assertions)]
+    {
+        Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"display notification "{}" with title "candidates""#,
+                    format!("{candidates:?}").replace('"', "")
+                ),
+            ])
+            .output()?;
+    }
     let preferred = candidates
         .iter()
         .find(|w| w.has_focus)
         .or_else(|| candidates.first())
         .map(|w| w.id.to_string());
+    #[cfg(debug_assertions)]
+    {
+        Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"display notification "{}" with title "preferred""#,
+                    format!("{preferred:?}").replace('"', "")
+                ),
+            ])
+            .output()?;
+    }
     yabai_run(&["-m", "space", "--focus", sel])?;
     if let Some(id) = preferred {
         yabai_run(&["-m", "window", "--focus", &id])?;
