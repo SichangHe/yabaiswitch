@@ -48,7 +48,8 @@ fn focus_space(sel: &str) -> Result<()> {
     let idx = serde_json::from_str::<SpaceIndex>(&raw)?.index;
     let idx_s = idx.to_string();
     let _ = yabai_run(&["-m", "space", "--focus", &idx_s]);
-    for _ in 0..10 {
+    let mut consecutive = 0u8;
+    for i in 0..20u8 {
         sleep(Duration::from_millis(10));
         let on_target = yabai_run(&["-m", "query", "--spaces", "--space"])
             .ok()
@@ -56,9 +57,14 @@ fn focus_space(sel: &str) -> Result<()> {
             .map(|s| s.index == idx)
             .unwrap_or(false);
         if on_target {
-            break;
+            consecutive += 1;
+            if i >= 9 && consecutive >= 2 {
+                break;
+            }
+        } else {
+            consecutive = 0;
+            let _ = yabai_run(&["-m", "space", "--focus", &idx_s]);
         }
-        let _ = yabai_run(&["-m", "space", "--focus", &idx_s]);
     }
     Ok(())
 }
