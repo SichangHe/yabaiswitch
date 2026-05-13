@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, env::args, process::Command};
+use std::{collections::VecDeque, env, env::args, process::Command};
 
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -7,13 +7,17 @@ const YABAI: &str = "/usr/local/bin/yabai";
 
 fn main() {
     if let Err(e) = run() {
-        let _ = Command::new("osascript")
-            .args([
-                "-e",
-                &format!(r#"display notification "{e}" with title "yabaiswitch" subtitle "error""#),
-            ])
-            .output();
+        notify(&e.to_string(), "yabaiswitch", "error");
     }
+}
+
+fn notify(content: &str, title: &str, subtitle: &str) {
+    let script = if subtitle.is_empty() {
+        format!(r#"display notification "{content}" with title "{title}""#)
+    } else {
+        format!(r#"display notification "{content}" with title "{title}" subtitle "{subtitle}""#)
+    };
+    let _ = Command::new("osascript").args(["-e", &script]).output();
 }
 
 fn yabai_run(yabai_args: &[&str]) -> Result<String> {
@@ -24,36 +28,26 @@ fn yabai_run(yabai_args: &[&str]) -> Result<String> {
     Ok(String::from_utf8(out.stdout)?)
 }
 
-fn parse_exclude_apps(args: &[String]) -> Vec<String> {
-    args.windows(2)
-        .find(|w| w[0] == "--exclude-apps")
-        .map(|w| w[1].split(',').map(str::to_owned).collect())
-        .unwrap_or_default()
-}
-
 fn run() -> Result<()> {
     let args: Vec<_> = args().collect();
-    let exclude = parse_exclude_apps(&args);
-    #[cfg(debug_assertions)]
-    {
-        Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    r#"display notification "{}" with title "exclude""#,
-                    format!("{exclude:?}").replace('"', "")
-                ),
-            ])
-            .output()?;
+    let exclude: Vec<String> = env::var("EXCLUDE_APPS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let debug = env::var("YABAISWITCH_DEBUG").is_ok();
+    if debug {
+        notify(&format!("{exclude:?}").replace('"', ""), "exclude", "");
     }
     match args.get(1).map(String::as_str) {
-        Some(dir @ ("next" | "last")) => cycle(dir, &exclude),
+        Some(dir @ ("next" | "last")) => cycle(dir, &exclude, debug),
         Some("space") => {
             let sel = match args.get(2).map(String::as_str) {
                 Some(s) if !s.starts_with('-') => s,
                 _ => bail!("space requires a selector: prev, next, first, last, recent, <index>"),
             };
-            space_focus(sel, &exclude)
+            space_focus(sel, &exclude, debug)
         }
         Some("info") => info(),
         Some(cmd) => bail!("Unknown command `{cmd}`. Valid: next, last, space, info."),
@@ -61,7 +55,7 @@ fn run() -> Result<()> {
     }
 }
 
-fn cycle(dir: &str, exclude: &[String]) -> Result<()> {
+fn cycle(dir: &str, exclude: &[String], debug: bool) -> Result<()> {
     let raw = yabai_run(&["-m", "query", "--windows", "--space"])?;
     let mut windows: VecDeque<WindowInfo> = serde_json::from_str(&raw)?;
     windows.make_contiguous().sort();
@@ -79,60 +73,45 @@ fn cycle(dir: &str, exclude: &[String]) -> Result<()> {
     } else {
         windows.rotate_right(1);
     }
-    yabai_run(&["-m", "window", "--focus", &windows[idx].id.to_string()])?;
+    let target = &windows[idx];
+    if debug {
+        notify(
+            &format!("id={} app={}", target.id, target.app),
+            "cycle target",
+            "",
+        );
+    }
+    yabai_run(&["-m", "window", "--focus", &target.id.to_string()])?;
     Ok(())
 }
 
 /// Focus a space and then refocus the best non-excluded, non-minimized, non-hidden window.
 /// Pre-queries target space to select preferred window before switching, preventing both
 /// Zoom decorative windows grabbing focus and the macOS bounce on stale/missing last-focused window.
-fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
+fn space_focus(sel: &str, exclude: &[String], debug: bool) -> Result<()> {
     let raw = yabai_run(&["-m", "query", "--windows", "--space", sel])?;
     let windows: Vec<WindowInfo> = serde_json::from_str(&raw)?;
-    #[cfg(debug_assertions)]
-    {
-        Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    r#"display notification "{}" with title "windows""#,
-                    format!("{windows:?}").replace('"', "")
-                ),
-            ])
-            .output()?;
+    if debug {
+        notify(&format!("{windows:?}").replace('"', ""), "windows", "");
     }
     let candidates: Vec<_> = windows
         .iter()
         .filter(|w| !exclude.contains(&w.app) && !w.is_minimized && !w.is_hidden)
         .collect();
-    #[cfg(debug_assertions)]
-    {
-        Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    r#"display notification "{}" with title "candidates""#,
-                    format!("{candidates:?}").replace('"', "")
-                ),
-            ])
-            .output()?;
+    if debug {
+        notify(
+            &format!("{candidates:?}").replace('"', ""),
+            "candidates",
+            "",
+        );
     }
     let preferred = candidates
         .iter()
         .find(|w| w.has_focus)
         .or_else(|| candidates.first())
         .map(|w| w.id.to_string());
-    #[cfg(debug_assertions)]
-    {
-        Command::new("osascript")
-            .args([
-                "-e",
-                &format!(
-                    r#"display notification "{}" with title "preferred""#,
-                    format!("{preferred:?}").replace('"', "")
-                ),
-            ])
-            .output()?;
+    if debug {
+        notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
     }
     yabai_run(&["-m", "space", "--focus", sel])?;
     if let Some(id) = preferred {
@@ -151,16 +130,11 @@ fn info() -> Result<()> {
         .map(|w| w.app.as_str())
         .collect::<Vec<_>>()
         .join(";");
-    Command::new("osascript")
-        .args([
-            "-e",
-            &format!(
-                r#"display notification "{apps}" with title "Space {}" subtitle "{} windows""#,
-                space.index,
-                wins.len()
-            ),
-        ])
-        .output()?;
+    notify(
+        &apps,
+        &format!("Space {}", space.index),
+        &format!("{} windows", wins.len()),
+    );
     Ok(())
 }
 
