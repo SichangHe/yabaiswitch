@@ -150,11 +150,9 @@ fn space_focus(sel: &str, exclude: &[String]) -> Result<()> {
         .map(|w| w.id);
     #[cfg(debug_assertions)]
     notify(&format!("{preferred:?}").replace('"', ""), "preferred", "");
+    focus_space(sel)?;
     if let Some(id) = preferred {
-        yabai_run(&["-m", "space", "--focus", sel])?;
         focus_window(id)?;
-    } else {
-        focus_space(sel)?;
     }
     Ok(())
 }
